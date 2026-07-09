@@ -5,26 +5,36 @@ import re
 import threading
 import time
 from queue import Queue
+from typing import Literal
 
 import serial
 
-from .models import Reading, sweep_angles
+from .models import Reading
 
 logger = logging.getLogger(__name__)
 
-# Matches the sketch's `Serial.print(distance); Serial.println("cm");`
-# output, e.g. b"23cm\r\n". Tolerant of stray whitespace/case.
+# The sketch prints two lines per sweep step, e.g. "90 degrees" then "23 cm".
+_ANGLE_RE = re.compile(rb"(-?\d+)\s*degrees", re.IGNORECASE)
 _DISTANCE_RE = re.compile(rb"(-?\d+)\s*cm", re.IGNORECASE)
 
 
-class SerialSource:
-    """Reads distance samples from my_custom_radar.ino over a serial port.
+def _parse_line(line: bytes) -> tuple[Literal["angle", "distance"], int] | None:
+    """Parses one line of the sketch's serial output into a (kind, value) pair."""
+    match = _ANGLE_RE.search(line)
+    if match is not None:
+        return "angle", int(match.group(1))
+    match = _DISTANCE_RE.search(line)
+    if match is not None:
+        return "distance", int(match.group(1))
+    return None
 
-    The Arduino sketch only ever prints the distance (e.g. "23cm"), one line
-    per servo step - it does not send the angle. This class reconstructs the
-    angle locally by walking the same sweep sequence the sketch's servo loop
-    follows (see :func:`radar_gui.models.sweep_angles`), so every line read
-    is paired with the angle the sensor was actually pointing at.
+
+class SerialSource:
+    """Reads angle/distance samples from my_custom_radar.ino over a serial port.
+
+    The sketch prints its angle and distance as two separate lines per sweep
+    step. This class pairs each distance reading with the angle line that
+    preceded it to build a complete :class:`~radar_gui.models.Reading`.
     """
 
     def __init__(self, port: str, baudrate: int = 9600, timeout: float = 1.0) -> None:
@@ -50,9 +60,14 @@ class SerialSource:
         if self._serial is not None and self._serial.is_open:
             self._serial.close()
 
+    def send_command(self, command: str) -> None:
+        """Sends a "START" or "STOP" command, matching handleSerialCommand() in the sketch."""
+        if self._serial is not None and self._serial.is_open:
+            self._serial.write(f"{command}\n".encode("ascii"))
+
     def _run(self, queue: "Queue[Reading]") -> None:
         assert self._serial is not None
-        angles = sweep_angles()
+        pending_angle: int | None = None
         while not self._stop_event.is_set():
             try:
                 line = self._serial.readline()
@@ -61,9 +76,23 @@ class SerialSource:
                 return
             if not line:
                 continue  # read timed out with no data - keep polling
-            match = _DISTANCE_RE.search(line)
-            if match is None:
+
+            parsed = _parse_line(line)
+            if parsed is None:
                 continue
-            distance = float(match.group(1))
-            angle = next(angles)
-            queue.put(Reading(angle=angle, distance=distance, timestamp=time.monotonic()))
+            kind, value = parsed
+
+            if kind == "angle":
+                pending_angle = value
+                continue
+
+            # kind == "distance": only emit a Reading once we know the angle
+            # it belongs to. If the two ever get out of sync (e.g. the
+            # connection dropped mid-line), drop the orphaned distance and
+            # wait for the next angle line to resynchronise.
+            if pending_angle is None:
+                continue
+            queue.put(
+                Reading(angle=pending_angle, distance=float(value), timestamp=time.monotonic())
+            )
+            pending_angle = None
