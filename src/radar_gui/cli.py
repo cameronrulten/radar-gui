@@ -56,13 +56,26 @@ def list_ports() -> None:
     "--warn-range",
     default=40.0,
     show_default=True,
-    help="Distance in cm below which blips are flagged as close "
-    "(matches the sketch's buzzer threshold).",
+    help="Distance in cm below which blips are flagged as close and the "
+    "proximity warning sound (if enabled) starts beeping.",
 )
 @click.option("--width", default=1000, show_default=True, help="Window width in pixels.")
 @click.option("--height", default=720, show_default=True, help="Window height in pixels.")
 @click.option("--fps", default=60, show_default=True, help="Target frames per second.")
 @click.option("--fullscreen", is_flag=True, default=False, help="Launch in fullscreen mode.")
+@click.option(
+    "--warn-sound/--no-warn-sound",
+    default=False,
+    show_default=True,
+    help="Play a proximity warning beep through this computer's speakers "
+    "(tempo/pitch rise as an object gets closer) instead of the instrument's own buzzer.",
+)
+@click.option(
+    "--warn-volume",
+    default=0.5,
+    show_default=True,
+    help="Warning beep volume, from 0.0 (silent) to 1.0 (full volume).",
+)
 def run(
     port: str | None,
     baud: int,
@@ -73,6 +86,8 @@ def run(
     height: int,
     fps: int,
     fullscreen: bool,
+    warn_sound: bool,
+    warn_volume: float,
 ) -> None:
     """Launch the radar GUI."""
     if not demo and not port:
@@ -96,6 +111,8 @@ def run(
             height=height,
             fps=fps,
             fullscreen=fullscreen,
+            warn_sound=warn_sound,
+            warn_volume=warn_volume,
         )
     except KeyboardInterrupt:
         click.echo("\nStopped.")

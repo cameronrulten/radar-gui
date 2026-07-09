@@ -19,8 +19,9 @@ WARN_COLOR = (255, 90, 60)
 
 TRAIL_DECAY = 6          # per-frame alpha subtraction, controls comet-tail length
 BLIP_LIFETIME = 4.0      # seconds a detected blip stays visible before fading out
-PANEL_HEIGHT = 96
+PANEL_HEIGHT = 112
 MARGIN = 40
+BUTTON_SIZE = (170, 40)
 
 
 @dataclass
@@ -47,8 +48,12 @@ class RadarDisplay:
     ) -> None:
         pygame.init()
         pygame.display.set_caption("SODAR - radar-gui")
-        flags = pygame.FULLSCREEN if fullscreen else pygame.RESIZABLE
-        self.screen = pygame.display.set_mode((width, height), flags)
+        self._windowed_size = (width, height)
+        self._fullscreen = False
+        if fullscreen:
+            self._enter_fullscreen()
+        else:
+            self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
         self.clock = pygame.time.Clock()
         self.max_range = max_range
         self.warn_range = warn_range
@@ -63,6 +68,7 @@ class RadarDisplay:
 
         self.latest: Reading | None = None
         self.blips: list[_Blip] = []
+        self.scanning = False
         self._recompute_geometry()
 
     def _recompute_geometry(self) -> None:
@@ -73,28 +79,67 @@ class RadarDisplay:
         self.cy = height - PANEL_HEIGHT - MARGIN
         self.radius = max(50.0, min((width - 2 * MARGIN) / 2, self.cy - MARGIN))
 
-    def handle_events(self) -> bool:
-        """Processes pending window events. Returns False when the app should quit."""
+        panel_top = height - PANEL_HEIGHT
+        button_width, button_height = BUTTON_SIZE
+        self.button_rect = pygame.Rect(
+            self.cx - button_width / 2,
+            panel_top + (PANEL_HEIGHT - button_height) / 2,
+            button_width,
+            button_height,
+        )
+
+    def set_scanning(self, scanning: bool) -> None:
+        self.scanning = scanning
+
+    def handle_events(self) -> tuple[bool, bool]:
+        """Processes pending window events.
+
+        Returns (running, toggle_requested) - running is False when the app
+        should quit, toggle_requested is True when the user clicked the
+        Start/Stop button or pressed Space.
+        """
+        running = True
+        toggle_requested = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return False
-            if event.type == pygame.VIDEORESIZE:
+                running = False
+            elif event.type == pygame.VIDEORESIZE and not self._fullscreen:
                 self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                 self._recompute_geometry()
-            if event.type == pygame.KEYDOWN:
+            elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    return False
-                if event.key == pygame.K_f:
+                    running = False
+                elif event.key == pygame.K_f:
                     self._toggle_fullscreen()
-        return True
+                elif event.key == pygame.K_SPACE:
+                    toggle_requested = True
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1 and self.button_rect.collidepoint(event.pos):
+                    toggle_requested = True
+        return running, toggle_requested
 
     def _toggle_fullscreen(self) -> None:
-        is_fullscreen = bool(self.screen.get_flags() & pygame.FULLSCREEN)
-        if is_fullscreen:
-            self.screen = pygame.display.set_mode((1000, 720), pygame.RESIZABLE)
+        if self._fullscreen:
+            self._exit_fullscreen()
         else:
-            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self._enter_fullscreen()
         self._recompute_geometry()
+
+    def _enter_fullscreen(self) -> None:
+        # A real exclusive display-mode switch (pygame.FULLSCREEN) is flaky
+        # under SDL2 on macOS, especially on Retina displays - it can leave a
+        # black window or silently fail to resize. A borderless window sized
+        # to the desktop resolution is the reliable equivalent and avoids a
+        # mode switch entirely.
+        if not self._fullscreen:
+            self._windowed_size = self.screen.get_size()
+        info = pygame.display.Info()
+        self.screen = pygame.display.set_mode((info.current_w, info.current_h), pygame.NOFRAME)
+        self._fullscreen = True
+
+    def _exit_fullscreen(self) -> None:
+        self.screen = pygame.display.set_mode(self._windowed_size, pygame.RESIZABLE)
+        self._fullscreen = False
 
     def update(self, reading: Reading | None) -> None:
         if reading is None:
@@ -127,6 +172,7 @@ class RadarDisplay:
         self._draw_trail()
         self._draw_blips()
         self._draw_panel()
+        self._draw_button()
         pygame.display.flip()
         self.clock.tick(self.fps)
 
@@ -185,6 +231,9 @@ class RadarDisplay:
         title = self.font_big.render("SODAR", True, TEXT_COLOR)
         self.screen.blit(title, (MARGIN, MARGIN // 2 - 8))
 
+        state_text = "STATE  SCANNING" if self.scanning else "STATE  STOPPED"
+        state_color = TEXT_COLOR if self.scanning else DIM_TEXT_COLOR
+
         if self.latest is not None:
             angle_text = f"ANGLE  {self.latest.angle:>3}deg"
             distance_text = f"RANGE  {self.latest.distance:>6.1f}cm"
@@ -200,6 +249,7 @@ class RadarDisplay:
             status_color = DIM_TEXT_COLOR
 
         lines = [
+            (state_text, state_color),
             (angle_text, TEXT_COLOR),
             (distance_text, TEXT_COLOR),
             (status_text, status_color),
@@ -217,6 +267,20 @@ class RadarDisplay:
             surf = self.font_small.render(text, True, DIM_TEXT_COLOR)
             rect = surf.get_rect()
             self.screen.blit(surf, (width - rect.width - MARGIN, panel_top + 10 + i * 20))
+
+    def _draw_button(self) -> None:
+        if self.scanning:
+            fill_color = (50, 15, 15)
+            border_color = WARN_COLOR
+            label = "STOP  (space)"
+        else:
+            fill_color = (10, 40, 20)
+            border_color = SWEEP_COLOR
+            label = "START  (space)"
+        pygame.draw.rect(self.screen, fill_color, self.button_rect, border_radius=6)
+        pygame.draw.rect(self.screen, border_color, self.button_rect, width=2, border_radius=6)
+        text = self.font.render(label, True, border_color)
+        self.screen.blit(text, text.get_rect(center=self.button_rect.center))
 
     def quit(self) -> None:
         pygame.quit()

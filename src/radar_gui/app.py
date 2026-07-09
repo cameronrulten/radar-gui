@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from queue import Empty, Queue
 
+import pygame
+
+from .audio_warning import ProximityWarning
 from .demo_source import DemoSource
 from .display import RadarDisplay
 from .models import Reading
@@ -21,6 +24,8 @@ def run_app(
     height: int,
     fps: int,
     fullscreen: bool,
+    warn_sound: bool,
+    warn_volume: float,
 ) -> None:
     queue: "Queue[Reading]" = Queue(maxsize=1000)
 
@@ -31,6 +36,15 @@ def run_app(
         assert port is not None
         source = SerialSource(port=port, baudrate=baud)
         source_label = f"{port} @ {baud}"
+
+    if warn_sound:
+        # Must happen before pygame.init() (called inside RadarDisplay) to
+        # take effect, so the mixer format matches what ProximityWarning
+        # synthesizes its beeps at.
+        pygame.mixer.pre_init(frequency=44100, size=-16, channels=2)
+        proximity = ProximityWarning(warn_range=warn_range, volume=warn_volume)
+    else:
+        proximity = None
 
     source.start(queue)
 
@@ -44,10 +58,17 @@ def run_app(
         source_label=source_label,
     )
 
+    scanning = False
+    current_distance: float | None = None
+
     try:
         running = True
         while running:
-            running = display.handle_events()
+            running, toggle_requested = display.handle_events()
+            if toggle_requested:
+                scanning = not scanning
+                source.send_command("START" if scanning else "STOP")
+            display.set_scanning(scanning)
 
             latest: Reading | None = None
             for _ in range(MAX_READINGS_PER_FRAME):
@@ -55,8 +76,12 @@ def run_app(
                     latest = queue.get_nowait()
                 except Empty:
                     break
+            if latest is not None:
+                current_distance = latest.distance
 
             display.update(latest)
+            if proximity is not None and current_distance is not None:
+                proximity.update(current_distance, scanning)
             display.render()
     finally:
         source.stop()

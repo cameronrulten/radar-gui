@@ -22,6 +22,7 @@ class DemoSource:
         self._max_range = max_range
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._scanning_event = threading.Event()  # unset -> starts stopped, like the sketch
 
     def start(self, queue: "Queue[Reading]") -> None:
         self._stop_event.clear()
@@ -32,14 +33,24 @@ class DemoSource:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._scanning_event.set()  # wake the thread if it's idling, so it can exit
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+
+    def send_command(self, command: str) -> None:
+        """Mirrors SerialSource.send_command so the GUI's Start/Stop button works in --demo too."""
+        if command == "START":
+            self._scanning_event.set()
+        elif command == "STOP":
+            self._scanning_event.clear()
 
     def _run(self, queue: "Queue[Reading]") -> None:
         angles = sweep_angles()
         obstacle_angle = random.uniform(40, 140)
         obstacle_width = random.uniform(8, 20)
         while not self._stop_event.is_set():
+            if not self._scanning_event.wait(timeout=0.1):
+                continue
             angle = next(angles)
             baseline = self._max_range * 0.85
             wobble = 15 * math.sin(time.monotonic() * 0.5)
