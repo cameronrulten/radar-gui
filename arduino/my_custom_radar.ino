@@ -7,74 +7,71 @@ my_custom_radar.ino written by Cameron Rulten ©2026
 #include <Servo.h>
 #include "SR04.h"
 
-const int buzzer_pin = 8;
 const int servo_pin = 9;
 const int echo_pin = 11;
 const int trigger_pin = 12;
 
-
-SR04 mysensor = SR04(echo_pin,trigger_pin);
+SR04 mysensor = SR04(echo_pin, trigger_pin);
 Servo myservo;
 
 long distance;
-int angle;
+int angle = 0;
+int direction = 1;
+bool scanning = false;
 
-int printDistance(int distance){
-  Serial.print(distance);
-  Serial.println(" cm");
-}
-
-int printAngle(int angle){
+void printAngle(int angle) {
   Serial.print(angle);
   Serial.println(" degrees");
 }
 
-void beepBuzzer(int beep_interval){
-  //activate the active buzzer
-  digitalWrite(buzzer_pin, HIGH);
-  delay(beep_interval);//wait for beep_interval ms
-  //deactivate the active buzzer
-  digitalWrite(buzzer_pin, LOW);
-  delay(1);//we don't want to wait long here as the sensor is scanning quite quickly!!!
+void printDistance(int distance) {
+  Serial.print(distance);
+  Serial.println(" cm");
+}
+
+// Checks for a "START" or "STOP" command from the GUI. Called once per
+// sweep step (every ~20ms) so a Stop request takes effect almost immediately
+// instead of waiting for a full 0-180-0 sweep to finish.
+void handleSerialCommand() {
+  if (!Serial.available()) {
+    return;
+  }
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  if (command == "START") {
+    scanning = true;
+  } else if (command == "STOP") {
+    scanning = false;
+  }
 }
 
 void setup() {
-
-  pinMode(buzzer_pin, OUTPUT); //initialize the buzzer pin as an output
-  myservo.attach(servo_pin); //initialize servo motor
+  myservo.attach(servo_pin); // initialize servo motor
+  myservo.write(angle);
   Serial.begin(9600); // initialize sensor data rate
-  //delay(1000);
-
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  for(int i=0;i<=180;i++)
-  {
-    myservo.write(i); //start servo motor scanning
-    angle = myservo.read();
-    printAngle(angle);
-    delay(20);
-    distance=mysensor.Distance(); //get distance from sensor
-    printDistance(distance); //print distance value to screen
-  
-    if(distance < 40){
-      int beep_interval = map(distance, 40, 0, 50, 1); //set the beeping interval
-      beepBuzzer(beep_interval); //beep according to beep interval if object in range
-    }
-  }
-  for(int i=180;i>=0;i--)
-  {
-    myservo.write(i);
-    angle = myservo.read();
-    printAngle(angle);
-    delay(20);
-    distance=mysensor.Distance();
-    printDistance(distance);
+  handleSerialCommand();
 
-    if(distance < 40){
-      int beep_interval = map(distance, 40, 0, 50, 1); //set the beeping interval
-      beepBuzzer(beep_interval); //beep according to beep interval if object in range
-    }
+  if (!scanning) {
+    delay(20); // idle - keep polling for a START command without sweeping
+    return;
+  }
+
+  myservo.write(angle);
+  printAngle(angle);
+  delay(20);
+
+  distance = mysensor.Distance(); // get distance from sensor
+  printDistance(distance); // print distance value to screen
+
+  angle += direction;
+  if (angle >= 180) {
+    angle = 180;
+    direction = -1;
+  } else if (angle <= 0) {
+    angle = 0;
+    direction = 1;
   }
 }
