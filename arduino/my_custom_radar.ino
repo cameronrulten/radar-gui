@@ -17,10 +17,16 @@ SR04 mysensor = SR04(echo_pin,trigger_pin);
 Servo myservo;
 
 long distance;
+int angle;
 
 int printDistance(int distance){
   Serial.print(distance);
-  Serial.println("cm");
+  Serial.println(" cm");
+}
+
+int printAngle(int angle){
+  Serial.print(angle);
+  Serial.println(" degrees");
 }
 
 void beepBuzzer(int beep_interval){
@@ -46,10 +52,12 @@ void loop() {
   for(int i=0;i<=180;i++)
   {
     myservo.write(i); //start servo motor scanning
+    angle = myservo.read();
+    printAngle(angle);
     delay(20);
     distance=mysensor.Distance(); //get distance from sensor
     printDistance(distance); //print distance value to screen
-
+  
     if(distance < 40){
       int beep_interval = map(distance, 40, 0, 50, 1); //set the beeping interval
       beepBuzzer(beep_interval); //beep according to beep interval if object in range
@@ -58,6 +66,8 @@ void loop() {
   for(int i=180;i>=0;i--)
   {
     myservo.write(i);
+    angle = myservo.read();
+    printAngle(angle);
     delay(20);
     distance=mysensor.Distance();
     printDistance(distance);
