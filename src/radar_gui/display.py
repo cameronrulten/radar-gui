@@ -22,6 +22,7 @@ BLIP_LIFETIME = 4.0      # seconds a detected blip stays visible before fading o
 PANEL_HEIGHT = 112
 MARGIN = 40
 BUTTON_SIZE = (170, 40)
+QUIT_BUTTON_SIZE = (90, 32)
 
 
 @dataclass
@@ -88,6 +89,14 @@ class RadarDisplay:
             button_height,
         )
 
+        quit_width, quit_height = QUIT_BUTTON_SIZE
+        self.quit_button_rect = pygame.Rect(
+            width - MARGIN - quit_width,
+            MARGIN // 2 - 8,
+            quit_width,
+            quit_height,
+        )
+
     def set_scanning(self, scanning: bool) -> None:
         self.scanning = scanning
 
@@ -113,9 +122,11 @@ class RadarDisplay:
                     self._toggle_fullscreen()
                 elif event.key == pygame.K_SPACE:
                     toggle_requested = True
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1 and self.button_rect.collidepoint(event.pos):
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.button_rect.collidepoint(event.pos):
                     toggle_requested = True
+                elif self.quit_button_rect.collidepoint(event.pos):
+                    running = False
         return running, toggle_requested
 
     def _toggle_fullscreen(self) -> None:
@@ -173,6 +184,7 @@ class RadarDisplay:
         self._draw_blips()
         self._draw_panel()
         self._draw_button()
+        self._draw_quit_button()
         pygame.display.flip()
         self.clock.tick(self.fps)
 
@@ -281,6 +293,12 @@ class RadarDisplay:
         pygame.draw.rect(self.screen, border_color, self.button_rect, width=2, border_radius=6)
         text = self.font.render(label, True, border_color)
         self.screen.blit(text, text.get_rect(center=self.button_rect.center))
+
+    def _draw_quit_button(self) -> None:
+        pygame.draw.rect(self.screen, (50, 15, 15), self.quit_button_rect, border_radius=6)
+        pygame.draw.rect(self.screen, WARN_COLOR, self.quit_button_rect, width=2, border_radius=6)
+        text = self.font_small.render("QUIT", True, WARN_COLOR)
+        self.screen.blit(text, text.get_rect(center=self.quit_button_rect.center))
 
     def quit(self) -> None:
         pygame.quit()

@@ -86,7 +86,9 @@ uv run radar-gui run --port /dev/cu.wchusbserial1101
 
 The radar starts idle. Click the **Start** button (or press `Space`) to tell
 the Arduino to begin sweeping; click it again (or press `Space`) to stop.
-Press `f` to toggle fullscreen, `Esc` or close the window to quit.
+Press `f` to toggle fullscreen. Click **Quit** (top-right), press `Esc`, or
+close the window to exit - all three send `STOP` first if the Arduino is
+still scanning, then shut everything down cleanly.
 
 Add a software proximity warning through your Mac's speakers - beep tempo and
 pitch step up as an object gets closer, instead of the instrument's old active

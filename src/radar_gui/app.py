@@ -84,5 +84,9 @@ def run_app(
                 proximity.update(current_distance, scanning)
             display.render()
     finally:
+        # Leave the Arduino idle rather than mid-sweep, regardless of which
+        # quit path got us here (Esc, window close, or the Quit button).
+        if scanning:
+            source.send_command("STOP")
         source.stop()
         display.quit()
